@@ -1,0 +1,126 @@
+---
+title: "American Community Survey 2010-2019"
+date: October 11, 2023
+author: "Noah Gibson"
+format: 
+    html: 
+      embed-resources: true
+      theme: spacelab
+      toc: true
+      number-sections: false
+      code-tools: true
+      code-fold: false
+      df-print: kable
+editor: source
+execute:
+  echo: true
+  message: false
+  warning: false
+editor_options: 
+  chunk_output_type: inline
+---
+
+The purpose of this document is to clean and merge data from the 2010-2019 American Community Survey at the PUMA level.
+
+```{r}
+library(tidyverse)
+library(tidycensus)
+```
+
+```{r}
+# extract estimates for 2021
+d_2021 <- get_acs(geography = "puma", 
+              variables = c(med_income = "B19013_001", 
+                            total_pop = "B01003_001E", 
+                            race_white = "B03002_003E",
+                            race_black = "B03002_004E", 
+                            race_hispanic = "B03002_012E",
+                            educ_pop_25 = "B15003_001E",
+                            educ_bac = "B15003_022E", 
+                            educ_mas = "B15003_023E",
+                            educ_prof = "B15003_024E",
+                            educ_phd = "B15003_025E"), 
+              year = 2021,
+              survey = "acs1",
+              output = "wide"
+              )
+
+d_2021 |> 
+  mutate(phd = educ_phd / educ_pop_25) |> 
+  select(NAME, med_incomeE, phd) |> 
+  arrange(-phd)
+```
+
+***
+
+```{r}
+# loop through the years
+for (y in 2010:2019) {
+  d_year <- paste0("d_", y)
+  d <- get_acs(geography = "puma", 
+               variables = c(medincome = "B19013_001"), 
+               output = "wide", 
+               year = y,
+               survey = "acs1"
+               )
+  
+  d <- d |> 
+    mutate(year = y)
+  
+  assign(d_year, d)
+}
+
+```
+
+```{r}
+# merge 
+d <- bind_rows(d_2010, d_2011, d_2012, d_2013, d_2014,
+               d_2015, d_2016, d_2017, d_2018, d_2019) |> 
+  rename(med_income_estimate = medincomeE, 
+         med_income_moe = medincomeM)
+
+write.csv(d, "acs_2010-2019.csv")
+
+```
+
+## New data
+
+```{r}
+d <- read.csv("/Users/noahgibson/Dropbox/EO & Community Inequality/Data/Output/acs_eo_cbp_complete.csv")
+```
+
+```{r}
+library(skimr)
+
+skim(d)
+```
+
+```{r}
+d |> 
+  group_by(GEOID) |> 
+  summarise(n = (n()/5)) |> 
+  arrange(-n)
+```
+
+```{r}
+d |> 
+  filter(GEOID == 3902100	)
+```
+
+```{r}
+library(pilot)
+d |> 
+  filter(year == 2018) |> 
+  group_by(GEOID) |> 
+  summarise(mean_income = mean(med_income_estimate),
+            mean_eo_n = mean(eo_n)) |> 
+  ggplot(aes(x = mean_eo_n, y = mean_income))+
+    geom_point(alpha = .4)+
+    geom_smooth(method = "gam")+
+    theme_pilot()
+```
+
+
+
+
+
