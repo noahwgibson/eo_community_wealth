@@ -1,0 +1,277 @@
+---
+title: "American Community Survey 2010-2019"
+date: October 25, 2023
+author: "Noah Gibson"
+format: 
+    html: 
+      embed-resources: true
+      theme: spacelab
+      toc: true
+      number-sections: false
+      code-tools: true
+      code-fold: false
+      df-print: kable
+editor: source
+execute:
+  echo: true
+  message: false
+  warning: false
+editor_options: 
+  chunk_output_type: inline
+---
+
+The purpose of this document is to clean and merge data from the 2010-2019 American Community Survey at the PUMA level.
+
+## Download 2021 data as a test 
+
+```{r}
+library(tidyverse)
+library(tidycensus)
+library(pilot) # package for ggplot themes
+theme_set(theme_pilot())
+
+census_api_key("113b0e05a7e55e0aeccd17830ecae2e6b3b8aa07")
+```
+
+Using the `tidycensus` package, I extract PUMA-level data for the 1-year American Community Survey for 2021. This code can be used to loop over for 2010-2019 years since the variable IDs should be the same across years. 
+```{r}
+d_2021 <- get_acs(geography = "puma", 
+              variables = c(med_income = "B19013_001", 
+                            pop_total = "B01003_001E", 
+                            race_white = "B03002_003E",
+                            race_black = "B03002_004E", 
+                            race_hispanic = "B03002_012E",
+                            educ_pop_25 = "B15003_001E",
+                            educ_bac = "B15003_022E", 
+                            educ_mas = "B15003_023E",
+                            educ_prof = "B15003_024E",
+                            educ_phd = "B15003_025E",
+                            pop_65 = "B09020_001E",
+                            work_pop_16 = "B08007_001E",
+                            work_inside_st_ct = "B08007_003E",
+                            work_agr_commute_min = "B08135_001E",
+                            work_pop_commute = "B08303_001E",
+                            households = "B11016_002E",
+                            hh_snap = "B22010_002E",
+                            pop_total_pov = "C17002_001E",
+                            pop_below_pov = "B17021_002E",
+                            med_home_value = "B25077_001E",
+                            med_rent = "B25058_001E"
+                            ),
+              year = 2021,
+              survey = "acs1",
+              output = "wide", # makes estimate a separate column 
+              )
+
+d_2021 <- d_2021 %>%
+  select(-ends_with("M")) |> # drop margin of error columns 
+  rename(med_income = med_incomeE) |> 
+  mutate(pct_white = race_white / pop_total,
+         pct_black = race_black / pop_total,
+         pct_hispanic = race_hispanic / pop_total,
+         pct_bac_25 = (educ_bac + educ_mas + educ_prof + educ_phd)/ educ_pop_25,
+         pct_work_inside_st_ct = work_inside_st_ct / work_pop_16,
+         avg_work_commute = work_agr_commute_min / work_pop_commute,
+         pct_snap = hh_snap / households,
+         pct_poverty = pop_below_pov / pop_total_pov) |> 
+  select(GEOID, NAME, pct_white, pct_black, pct_hispanic, pct_bac_25,
+         pct_work_inside_st_ct, avg_work_commute, pct_snap, pct_poverty,
+         med_income, med_home_value, med_rent)
+
+```
+```{r}
+#| echo: false
+#| results: hide
+
+d_2021_geo <- get_acs(geography = "puma", 
+              variables = c(med_income = "B19013_001", 
+                            pop_total = "B01003_001E", 
+                            race_white = "B03002_003E",
+                            race_black = "B03002_004E", 
+                            race_hispanic = "B03002_012E",
+                            educ_pop_25 = "B15003_001E",
+                            educ_bac = "B15003_022E", 
+                            educ_mas = "B15003_023E",
+                            educ_prof = "B15003_024E",
+                            educ_phd = "B15003_025E",
+                            pop_65 = "B09020_001E",
+                            work_pop_16 = "B08007_001E",
+                            work_inside_st_ct = "B08007_003E",
+                            work_agr_commute_min = "B08135_001E",
+                            work_pop_commute = "B08303_001E",
+                            households = "B11016_002E",
+                            hh_snap = "B22010_002E",
+                            pop_total_pov = "C17002_001E",
+                            pop_below_pov = "B17021_002E",
+                            med_home_value = "B25077_001E",
+                            med_rent = "B25058_001E"
+                            ),
+              year = 2021,
+              survey = "acs1",
+              output = "wide", # makes estimate a separate column 
+              geometry = TRUE
+              )
+
+d_2021_geo <- d_2021_geo %>%
+  select(-ends_with("M")) |> # drop margin of error columns 
+  rename(med_income = med_incomeE) |> 
+  mutate(pct_white = race_white / pop_total,
+         pct_black = race_black / pop_total,
+         pct_hispanic = race_hispanic / pop_total,
+         pct_bac_25 = (educ_bac + educ_mas + educ_prof + educ_phd)/ educ_pop_25,
+         pct_work_inside_st_ct = work_inside_st_ct / work_pop_16,
+         avg_work_commute = work_agr_commute_min / work_pop_commute,
+         pct_snap = hh_snap / households,
+         pct_poverty = pop_below_pov / pop_total_pov) |> 
+  select(GEOID, NAME, pct_white, pct_black, pct_hispanic, pct_bac_25,
+         pct_work_inside_st_ct, avg_work_commute, pct_snap, pct_poverty,
+         med_income, med_home_value, med_rent, geometry)
+
+```
+
+## Loop through 2010-2019
+
+```{r}
+# loop through the years
+for (y in 2010:2019) {
+  d_year <- paste0("d_", y)
+  d <- get_acs(geography = "puma", 
+              variables = c(med_income = "B19013_001", 
+                            pop_total = "B01003_001E", 
+                            race_white = "B03002_003E",
+                            race_black = "B03002_004E", 
+                            race_hispanic = "B03002_012E",
+                            educ_pop_25 = "B15003_001E",
+                            educ_bac = "B15003_022E", 
+                            educ_mas = "B15003_023E",
+                            educ_prof = "B15003_024E",
+                            educ_phd = "B15003_025E",
+                            pop_65 = "B09020_001E",
+                            work_pop_16 = "B08007_001E",
+                            work_inside_st_ct = "B08007_003E",
+                            work_agr_commute_min = "B08135_001E",
+                            work_pop_commute = "B08303_001E",
+                            households = "B11016_002E",
+                            hh_snap = "B22010_002E",
+                            pop_total_pov = "C17002_001E",
+                            pop_below_pov = "B17021_002E",
+                            med_home_value = "B25077_001E",
+                            med_rent = "B25058_001E"
+                            ), 
+               output = "wide", 
+               year = y,
+               survey = "acs1"
+              )
+  
+d <- d %>%
+  select(-ends_with("M")) |> # drop margin of error columns 
+  rename(med_income = med_incomeE) |> 
+  mutate(year = y,
+         pct_white = race_white / pop_total,
+         pct_black = race_black / pop_total,
+         pct_hispanic = race_hispanic / pop_total,
+         pct_bac_25 = (educ_bac + educ_mas + educ_prof + educ_phd)/ educ_pop_25,
+         pct_work_inside_st_ct = work_inside_st_ct / work_pop_16,
+         avg_work_commute = work_agr_commute_min / work_pop_commute,
+         pct_snap = hh_snap / households,
+         pct_poverty = pop_below_pov / pop_total_pov) |> 
+  select(GEOID, NAME, year, pct_white, pct_black, pct_hispanic, 
+         pct_bac_25, pct_work_inside_st_ct,
+         avg_work_commute, pct_snap, pct_poverty, med_income,
+         med_home_value, med_rent)
+  
+  assign(d_year, d)
+}
+
+```
+
+## Merge and export 2010-2019 data 
+```{r}
+# merge 
+d <- bind_rows(d_2010, d_2011, d_2012, d_2013, d_2014,
+               d_2015, d_2016, d_2017, d_2018, d_2019) 
+
+# export
+write.csv(d, "acs_2010-2019.csv")
+
+```
+
+```{r}
+library(skimr)
+skim(d)
+```
+
+## Basic visualization 
+
+Let's take a look at some variables to make sure they are specified correctly (2021 data): 
+
+### med_income
+
+```{r}
+library(mapview)
+
+mapview(d_2021_geo, zcol = "med_income")
+```
+
+### pct_phds
+Just out of curiosity (not a variable in the dataset), let's see the top 25 CBSA's by percent of the population with PhDs in 2021:
+```{r}
+
+d_2021_cbsa <- get_acs(geography = "cbsa", 
+              variables = c(
+                            educ_pop_25 = "B15003_001E",
+                            educ_phd = "B15003_025E"), 
+              year = 2021,
+              survey = "acs1",
+              output = "wide"
+              )
+
+d_2021_cbsa |> 
+  mutate(phd = ((educ_phd) / educ_pop_25)*100) |> 
+  select(NAME, phd) |> 
+  arrange(-phd) |> 
+  head(25) |> 
+  ggplot(aes(x = phd, y = reorder(NAME, phd)))+
+    geom_col(alpha = .9, size = 3, fill = "lightblue")+
+    labs(x = "% of pop with PhD", y = "")
+```
+
+### med_home_value 
+
+Wow, basically all California. 
+```{r}
+d_2021 |> 
+  select(NAME, med_home_value) |> 
+  arrange(-med_home_value) |> 
+  head(25) |> 
+  mutate(med_home_value = round(med_home_value, 2))
+
+
+```
+
+### avg_work_commute 
+
+And this is basically all New York.
+```{r}
+d_2021 |> 
+  select(NAME, avg_work_commute) |> 
+  arrange(-avg_work_commute) |> 
+  head(25) |> 
+  mutate(avg_work_commute = round(avg_work_commute, 2))
+
+
+```
+
+### pct_poverty 
+
+```{r}
+d_2021 |> 
+  select(NAME, pct_poverty) |> 
+  arrange(-pct_poverty) |> 
+  head(25) |> 
+  mutate(pct_poverty = round(pct_poverty, 2))
+
+```
+
+
+

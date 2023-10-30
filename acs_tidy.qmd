@@ -1,0 +1,105 @@
+---
+title: "American Community Survey 2010-2019"
+date: October 11, 2023
+author: "Noah Gibson"
+format: 
+    html: 
+      embed-resources: true
+      theme: spacelab
+      toc: true
+      number-sections: false
+      code-tools: true
+      code-fold: false
+      df-print: kable
+editor: source
+execute:
+  echo: true
+  message: false
+  warning: false
+editor_options: 
+  chunk_output_type: inline
+---
+
+The purpose of this document is to clean and merge data from the 2010-2019 American Community Survey at the PUMA level.
+
+```{r}
+library(tidyverse)
+library(tidycensus)
+```
+
+```{r}
+# extract estimates for 2021
+d_2021 <- get_acs(geography = "puma", 
+              variables = c(medincome = "B17021_002E"), 
+              year = 2021,
+              survey = "acs1",
+              state = c("OH", "NC"),
+              geometry = TRUE)
+```
+
+***
+
+```{r}
+# loop through the years
+for (y in 2010:2019) {
+  d_year <- paste0("d_", y)
+  d <- get_acs(geography = "puma", 
+               variables = c(medincome = "B19013_001"), 
+               state = "OH", 
+               year = y,
+               survey = "acs1"
+               )
+  
+  d <- d |> 
+    mutate(year = y)
+  
+  assign(d_year, d)
+}
+
+```
+
+```{r}
+# merge 
+d <- bind_rows(d_2010, d_2011, d_2012, d_2013, d_2014, d_2015, d_2016, d_2017, d_2018, d_2019)
+
+```
+
+***
+
+```{r}
+d |> filter(year == 2019) |> 
+  select(GEOID, NAME, estimate, year) |> 
+  head(20)
+```
+
+
+```{r}
+d |> arrange(estimate) |> 
+  select(GEOID, NAME, estimate, year) |> 
+  head(10)
+```
+```{r}
+d |> arrange(-estimate) |> 
+  select(GEOID, NAME, estimate, year) |>  
+  head(10)
+```
+
+***
+
+```{r}
+variables <- load_variables(year = 2017,
+                      dataset = "acs1")
+
+variables |> 
+  head(20)
+```
+
+***
+
+```{r}
+library(mapview)
+
+mapview(d_2021, zcol = "estimate")
+```
+
+
