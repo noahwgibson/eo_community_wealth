@@ -1,0 +1,186 @@
+---
+title: "EO and Community Social Capital"
+date: March 24, 2024
+author: "Noah Gibson"
+format: 
+    html: 
+      embed-resources: true
+      theme: spacelab
+      toc: true
+      number-sections: false
+      code-tools: true
+      code-fold: false
+      df-print: kable
+editor: source
+execute:
+  echo: true
+  message: false
+  warning: false
+editor_options: 
+  chunk_output_type: inline
+---
+
+In this document, I download, clean, and merge 3 different datasets (using a crosswalk): employee-ownership data, California election data, and the ACS. The final dataset is at the company level, with county-level information on elections and characteristics. 
+
+# Download and clean 
+
+## EO data 
+```{r}
+library(tidyverse)
+
+eo <- read.csv("~/Library/CloudStorage/Box-Box/Research/eo_wealth/all_bb_orgs.csv")
+
+cw <- read.csv("~/Library/CloudStorage/Box-Box/Research/eo_wealth/countyzipcrosswalk.csv")
+
+```
+
+```{r}
+eo <- eo |> 
+  filter(SPONS_DFE_MAIL_US_STATE == "CA") |> 
+  mutate(ZIP = as.numeric(substr(SPONS_DFE_MAIL_US_ZIP, 1, 5)))
+```
+
+```{r}
+cw <- cw |> 
+  filter(STATE == "CA")
+```
+
+
+
+## California election data
+```{r}
+election <- read.csv("~/Library/CloudStorage/Box-Box/Research/eo_wealth/election_data.csv")
+```
+
+```{r}
+election |> 
+  count(Purpose) |> 
+  arrange(-n) |> 
+  head()
+```
+
+```{r}
+el_school <- election |> 
+  filter(Purpose == "K-12 School Facility")
+  
+```
+
+
+
+## ACS 
+```{r}
+library(tidycensus)
+
+census_api_key("113b0e05a7e55e0aeccd17830ecae2e6b3b8aa07")
+```
+
+```{r}
+# loop through the years
+for (y in 2009:2019) {
+  d_year <- paste0("d_", y)
+  d <- get_acs(geography = "county", 
+              variables = c(med_income = "B19013_001", 
+                            pop_total = "B01003_001E", 
+                            race_white = "B03002_003E",
+                            race_black = "B03002_004E", 
+                            race_hispanic = "B03002_012E",
+                            educ_pop_25 = "B15003_001E",
+                            educ_bac = "B15003_022E", 
+                            educ_mas = "B15003_023E",
+                            educ_prof = "B15003_024E",
+                            educ_phd = "B15003_025E",
+                            pop_65 = "B09020_001E",
+                            work_pop_16 = "B08007_001E",
+                            work_inside_st_ct = "B08007_003E",
+                            work_agr_commute_min = "B08135_001E",
+                            work_pop_commute = "B08303_001E",
+                            households = "B11016_002E",
+                            hh_snap = "B22010_002E",
+                            pop_total_pov = "C17002_001E",
+                            pop_below_pov = "B17021_002E",
+                            med_home_value = "B25077_001E",
+                            med_rent = "B25058_001E"
+                            ), 
+               output = "wide", 
+               year = y,
+               survey = "acs1", 
+               state = "CA"
+              )
+  
+d <- d %>%
+  select(-ends_with("M")) |> # drop margin of error columns 
+  rename(med_income = med_incomeE) |> 
+  mutate(year = y,
+         pct_white = race_white / pop_total,
+         pct_black = race_black / pop_total,
+         pct_hispanic = race_hispanic / pop_total,
+         pct_bac_25 = (educ_bac + educ_mas + educ_prof + educ_phd)/ educ_pop_25,
+         pct_work_inside_st_ct = work_inside_st_ct / work_pop_16,
+         avg_work_commute = work_agr_commute_min / work_pop_commute,
+         pct_snap = hh_snap / households,
+         pct_poverty = pop_below_pov / pop_total_pov) |> 
+  select(GEOID, NAME, year, pct_white, pct_black, pct_hispanic, 
+         pct_bac_25, pct_work_inside_st_ct,
+         avg_work_commute, pct_snap, pct_poverty, med_income,
+         med_home_value, med_rent)
+  
+  assign(d_year, d)
+}
+
+```
+
+```{r}
+# merge 
+d <- bind_rows(d_2009, d_2010, d_2011, d_2012, d_2013, d_2014,
+               d_2015, d_2016, d_2017, d_2018, d_2019) 
+
+```
+
+```{r}
+d <- d |> 
+  mutate(GEOID = as.numeric(GEOID))
+```
+
+
+# Merge datasets
+
+```{r}
+# employee firms data and crosswalk
+df <- left_join(eo, cw, by = "ZIP") |> 
+  filter(COUNTYNAME != "") |> 
+  rename(GEOID = STCOUNTYFP)
+```
+```{r}
+# df and ACS
+df <- left_join(df, d, by = c("GEOID", "year") )
+```
+
+```{r}
+df <- df |> 
+  select(TOT_ACTIVE_PARTCP_CNT, SPONSOR_DFE_NAME, plan_start_year, year, esop_dummy, 
+         prof_dummy, bb_stake_size, ZIP, COUNTYNAME, STATE, GEOID, pct_white:med_rent) |> 
+  mutate(Agency.County = str_replace(COUNTYNAME, " County", ""))
+```
+
+```{r}
+# df and election data 
+el_school$year <- el_school$Election.Year
+
+el_df <- left_join(df, el_school, by = c("Agency.County", "year"))
+
+# export
+write.csv(d, "esop_election_data.csv")
+
+```
+
+```{r}
+df |> 
+  slice(3:9)
+el_df |> 
+  slice(3:21)
+```
+
+Next steps: how do we want to represent election data? May want to make it one observation per year or one variable per 10 year period.
+
+
+
